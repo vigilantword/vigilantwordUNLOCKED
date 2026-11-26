@@ -6,23 +6,17 @@ on:
     paths: ['*.zip']
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Unpack the app
         run: |
           set -e
@@ -34,9 +28,39 @@ jobs:
           test -f "$root/index.html"
           if [ "$root" != "site" ]; then mv "$root" app_out; rm -rf site; mv app_out site; fi
           ls site
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
-      - id: deployment
-        uses: actions/deploy-pages@v4
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    steps:
+      - name: Deploy to GitHub Pages
+        id: try1
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+      - name: Wait and retry
+        if: steps.try1.outcome == 'failure'
+        run: sleep 15
+      - name: Deploy to GitHub Pages (retry 1)
+        id: try2
+        if: steps.try1.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+      - name: Wait and retry again
+        if: steps.try2.outcome == 'failure'
+        run: sleep 45
+      - name: Deploy to GitHub Pages (retry 2)
+        id: try3
+        if: steps.try2.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+      - name: Stop if every attempt failed
+        if: steps.try1.outcome == 'failure' && steps.try2.outcome == 'failure' && steps.try3.outcome == 'failure'
+        run: exit 1
